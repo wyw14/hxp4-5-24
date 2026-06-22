@@ -11,6 +11,7 @@ export interface GameState {
   stepsUsed: number;
   selectedModelId: string | null;
   gameStatus: 'idle' | 'playing' | 'won' | 'lost';
+  paused: boolean;
 }
 
 export class OrigamiGame {
@@ -30,6 +31,9 @@ export class OrigamiGame {
   private resetBtn: HTMLButtonElement | null = null;
   private hintBtn: HTMLButtonElement | null = null;
   private nextBtn: HTMLButtonElement | null = null;
+  private pauseBtn: HTMLButtonElement | null = null;
+  private pauseOverlay: HTMLElement | null = null;
+  private gameMain: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -39,7 +43,8 @@ export class OrigamiGame {
       level: 1,
       stepsUsed: 0,
       selectedModelId: null,
-      gameStatus: 'idle'
+      gameStatus: 'idle',
+      paused: false
     };
     this.seed = generateSeed();
     this.rng = new SeededRandom(this.seed);
@@ -67,13 +72,14 @@ export class OrigamiGame {
               <span class="stat-label">步数</span>
               <span class="stat-value" id="steps-display">0/0</span>
             </span>
+            <button class="btn btn-pause" id="pause-btn">⏸️ 暂停</button>
           </div>
         </div>
 
-        <div class="game-main">
+        <div class="game-main" id="game-main">
           <div class="left-panel">
             <div class="panel-title">📐 折痕图</div>
-            <div class="question-info">
+            <div class="question-info" id="question-info">
               <h2 id="question-name">题目名称</h2>
               <p id="question-desc">题目描述</p>
             </div>
@@ -97,6 +103,19 @@ export class OrigamiGame {
           <button class="btn btn-next" id="next-btn" style="display: none;">➡️ 下一题</button>
           <div class="result-message" id="result-message"></div>
         </div>
+
+        <div class="pause-overlay" id="pause-overlay" style="display: none;">
+          <div class="pause-content">
+            <div class="pause-icon">🔒</div>
+            <h2 class="pause-title">游戏已暂停</h2>
+            <div class="pause-score">
+              <span class="pause-score-label">当前得分</span>
+              <span class="pause-score-value" id="pause-score-value">0</span>
+            </div>
+            <button class="btn btn-primary btn-resume" id="resume-btn">▶️ 继续游戏</button>
+            <p class="pause-hint">点击继续后将恢复暂停前的状态</p>
+          </div>
+        </div>
       </div>
     `;
 
@@ -105,11 +124,16 @@ export class OrigamiGame {
     this.resetBtn = this.container.querySelector('#reset-btn');
     this.hintBtn = this.container.querySelector('#hint-btn');
     this.nextBtn = this.container.querySelector('#next-btn');
+    this.pauseBtn = this.container.querySelector('#pause-btn');
+    this.pauseOverlay = this.container.querySelector('#pause-overlay');
+    this.gameMain = this.container.querySelector('#game-main');
 
     this.submitBtn?.addEventListener('click', () => this.checkAnswer());
     this.resetBtn?.addEventListener('click', () => this.resetFolds());
     this.hintBtn?.addEventListener('click', () => this.showHint());
     this.nextBtn?.addEventListener('click', () => this.nextQuestion());
+    this.pauseBtn?.addEventListener('click', () => this.pauseGame());
+    this.container.querySelector('#resume-btn')?.addEventListener('click', () => this.resumeGame());
   }
 
   private startGame(): void {
@@ -199,7 +223,7 @@ export class OrigamiGame {
   }
 
   private handleFold(lineId: string): void {
-    if (!this.foldStateManager || this.state.gameStatus !== 'playing') return;
+    if (!this.foldStateManager || this.state.gameStatus !== 'playing' || this.state.paused) return;
 
     if (this.foldStateManager.fold(lineId)) {
       this.state.stepsUsed = this.foldStateManager.getCurrentStep();
@@ -216,7 +240,7 @@ export class OrigamiGame {
   }
 
   private handleUnfold(lineId: string): void {
-    if (!this.foldStateManager || this.state.gameStatus !== 'playing') return;
+    if (!this.foldStateManager || this.state.gameStatus !== 'playing' || this.state.paused) return;
 
     if (this.foldStateManager.unfold(lineId)) {
       this.state.stepsUsed = this.foldStateManager.getCurrentStep();
@@ -236,7 +260,7 @@ export class OrigamiGame {
   }
 
   private selectModel(modelId: string): void {
-    if (this.state.gameStatus !== 'playing') return;
+    if (this.state.gameStatus !== 'playing' || this.state.paused) return;
 
     this.state.selectedModelId = modelId;
 
@@ -260,7 +284,7 @@ export class OrigamiGame {
   }
 
   private checkAnswer(): void {
-    if (!this.state.currentQuestion || !this.state.selectedModelId) return;
+    if (!this.state.currentQuestion || !this.state.selectedModelId || this.state.paused) return;
 
     if (!this.foldStateManager?.isComplete()) {
       this.updateSubmitState();
@@ -305,7 +329,59 @@ export class OrigamiGame {
     });
   }
 
+  private pauseGame(): void {
+    if (this.state.gameStatus !== 'playing' || this.state.paused) return;
+
+    this.state.paused = true;
+
+    if (this.gameMain) {
+      this.gameMain.style.visibility = 'hidden';
+    }
+
+    const questionInfo = this.container.querySelector('#question-info') as HTMLElement;
+    if (questionInfo) {
+      questionInfo.style.visibility = 'hidden';
+    }
+
+    if (this.pauseOverlay) {
+      const pauseScoreValue = this.pauseOverlay.querySelector('#pause-score-value');
+      if (pauseScoreValue) {
+        pauseScoreValue.textContent = String(this.state.score);
+      }
+      this.pauseOverlay.style.display = 'flex';
+    }
+
+    if (this.pauseBtn) {
+      this.pauseBtn.disabled = true;
+    }
+  }
+
+  private resumeGame(): void {
+    if (!this.state.paused) return;
+
+    this.state.paused = false;
+
+    if (this.gameMain) {
+      this.gameMain.style.visibility = 'visible';
+    }
+
+    const questionInfo = this.container.querySelector('#question-info') as HTMLElement;
+    if (questionInfo) {
+      questionInfo.style.visibility = 'visible';
+    }
+
+    if (this.pauseOverlay) {
+      this.pauseOverlay.style.display = 'none';
+    }
+
+    if (this.pauseBtn) {
+      this.pauseBtn.disabled = false;
+    }
+  }
+
   private resetFolds(): void {
+    if (this.state.paused) return;
+
     this.origamiSVG?.reset();
     this.foldStateManager?.reset();
     this.state.stepsUsed = 0;
@@ -327,7 +403,7 @@ export class OrigamiGame {
   }
 
   private showHint(): void {
-    if (!this.foldStateManager) return;
+    if (!this.foldStateManager || this.state.paused) return;
 
     const nextLine = this.foldStateManager.getNextFoldLine();
 
@@ -346,6 +422,8 @@ export class OrigamiGame {
   }
 
   private nextQuestion(): void {
+    if (this.state.paused) return;
+
     this.currentQuestionIndex++;
     this.state.level++;
     this.loadQuestion(this.currentQuestionIndex);
